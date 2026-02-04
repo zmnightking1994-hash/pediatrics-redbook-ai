@@ -3,107 +3,90 @@ import cv2
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from PIL import Image
 
-# إعدادات الصفحة الاحترافية
-st.set_page_config(page_title="Pediatrics AI Radiologist", layout="wide", initial_sidebar_state="expanded")
+# إعداد واجهة احترافية
+st.set_page_config(page_title="Pediatrics AI Radiologist", layout="wide")
 
-# تصميم واجهة المستخدم بـ CSS
 st.markdown("""
     <style>
-    .main { background-color: #f0f2f6; }
-    .stAlert { border-radius: 12px; }
-    .stButton>button { width: 100%; border-radius: 8px; height: 3em; background-color: #007bff; color: white; }
+    .reportview-container { background: #f0f2f6; }
+    .stAlert { border-radius: 10px; border: 1px solid #d1d8e0; }
+    h1 { color: #2c3e50; text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- الوظائف الذكية ---
+st.title("🩺 مساعد طبيب الأطفال الذكي (Red Book AI)")
 
-@st.cache_resource
-def load_ai_model():
-    # تحميل نموذج معالجة الصور
-    return tf.keras.applications.MobileNetV2(weights='imagenet', include_top=True)
-
-def apply_heatmap(img):
-    # إنشاء خريطة حرارية لتحديد مناطق الكثافة (الالتهاب)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    enhanced = cv2.equalizeHist(gray)
-    heatmap = cv2.applyColorMap(enhanced, cv2.COLORMAP_JET)
-    combined = cv2.addWeighted(img, 0.6, heatmap, 0.4, 0)
-    return combined
-
-def extract_treatment_summary(text):
-    # فلترة النص للبحث عن الأدوية والجرعات فقط
-    keywords = ["Amoxicillin", "Ampicillin", "Ceftriaxone", "Penicillin", "dose", "mg/kg", "days", "Duration", "IV", "Oral"]
+# --- محرك الفلترة الطبية الذكي ---
+def clean_medical_text(text):
+    # قائمة الأدوية والكلمات التي تهم الطبيب في الـ Red Book
+    important_keywords = [
+        "Amoxicillin", "Ampicillin", "Ceftriaxone", "Penicillin", "Azithromycin", 
+        "dose", "mg/kg", "days", "Duration", "IV", "Oral", "Treatment"
+    ]
+    
+    # تنظيف النص من الروابط وكلام الـ HIV غير ذي الصلة بالحالات العامة
     sentences = text.split('.')
-    summary = [s.strip() for s in sentences if any(key.lower() in s.lower() for key in keywords)]
-    return summary
+    filtered_sentences = []
+    
+    for s in sentences:
+        # استبعاد الجمل التي تحتوي على HIV إذا لم نكن نبحث عنها
+        if "HIV" in s or "clinicalinfo" in s:
+            continue
+        # الاحتفاظ بالجمل التي تحتوي على أدوية أو جرعات
+        if any(key.lower() in s.lower() for key in important_keywords):
+            filtered_sentences.append(s.strip())
+            
+    return filtered_sentences[:5] # إرجاع أهم 5 جمل علاجية فقط
 
 # --- واجهة التطبيق ---
+uploaded_file = st.file_uploader("ارفع صورة الأشعة هنا...", type=["jpg", "png", "jpeg"])
 
-st.title("🩺 مساعد طبيب الأطفال الذكي (Red Book AI)")
-st.write("نظام متطور لتحليل الأشعة الصدرية وربطها ببروتوكولات Red Book 2024")
-
-# شريط جانبي للمعلومات
-with st.sidebar:
-    st.header("حول النظام")
-    st.info("يستخدم هذا النظام شبكات عصبية اصطناعية لتحليل كثافة الرئة ومطابقتها مع المراجع الطبية المعتمدة.")
-    if st.button("إعادة ضبط النظام"):
-        st.rerun()
-
-# رفع الصورة
-uploaded_file = st.file_uploader("قم بسحب وإفلات صورة الأشعة هنا...", type=["jpg", "jpeg", "png"])
-
-if uploaded_file is not None:
-    # قراءة الصورة وتجهيزها
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    original_img = cv2.imdecode(file_bytes, 1)
+if uploaded_file:
+    col1, col2 = st.columns([1, 1.2])
     
-    col1, col2 = st.columns([1, 1])
+    # معالجة الصورة للعرض الحراري
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, 1)
     
     with col1:
-        st.subheader("🔍 التحليل البصري المتقدم")
-        processed_img = apply_heatmap(original_img)
-        st.image(processed_img, caption="تحديد مناطق الارتشاح (Heatmap Overlay)", use_container_width=True)
+        st.subheader("🔍 التحليل البصري (Heatmap)")
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        heatmap = cv2.applyColorMap(cv2.equalizeHist(gray), cv2.COLORMAP_JET)
+        st.image(cv2.addWeighted(img, 0.6, heatmap, 0.4, 0), use_container_width=True)
 
     with col2:
-        st.subheader("📋 التقرير والتشخيص")
+        st.subheader("📋 التشخيص والبروتوكول العلاجي")
         
-        # تحليل الكثافة والنمط
-        gray_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-        avg_density = np.mean(gray_img)
+        # تحليل الكثافة (تبسيطاً)
+        avg_density = np.mean(gray)
+        pathogen = "Streptococcus pneumoniae" if avg_density > 130 else "Mycoplasma pneumoniae"
         
-        # منطق التشخيص
-        if avg_density < 95:
-            st.balloons()
-            st.success("✅ النتيجة: أشعة صدر طبيعية (Normal)")
-            st.write("لا توجد علامات ارتشاح واضحة تتطلب تدخلاً علاجياً حسب البروتوكول.")
-        else:
-            # تصنيف المسبب بناءً على النمط
-            pathogen = "Streptococcus pneumoniae" if avg_density > 130 else "Mycoplasma pneumoniae"
-            pattern = "Lobar Consolidation" if avg_density > 130 else "Interstitial Infiltrates"
+        st.error(f"⚠️ المسبب المرجح: {pathogen}")
+        
+        # جلب البيانات من المرجع المعدل
+        try:
+            db = pd.read_excel("pneumonia_reference.xlsx")
+            raw_data = db[db['Pathogen'] == pathogen].iloc[0]['Treatment Snippet']
+            page_num = db[db['Pathogen'] == pathogen].iloc[0]['Page']
             
-            st.error(f"🚨 المسبب المرجح: {pathogen}")
-            st.warning(f"📍 النمط الشعاعي: {pattern}")
+            st.info(f"📖 مرجع الكتاب: صفحة {page_num}")
+            st.markdown("### 💊 الجرعات والعلاج المقترح:")
             
-            # جلب البيانات من المرجع
-            try:
-                db = pd.read_excel("pneumonia_reference.xlsx")
-                entry = db[db['Pathogen'] == pathogen].iloc[0]
-                
-                st.markdown(f"**📖 مرجع Red Book: صفحة {entry['Page']}**")
-                
-                # عرض الخلاصة العلاجية المفلترة
-                summary = extract_treatment_summary(entry['Treatment Snippet'])
-                
-                st.markdown("### 💊 الجرعات والعلاج المقترح:")
-                if summary:
-                    for line in summary[:5]: # عرض أول 5 جمل مفيدة
-                        st.info(line)
+            # عرض العلاج المفلتر
+            clinical_tips = clean_medical_text(raw_data)
+            
+            if clinical_tips:
+                for tip in clinical_tips:
+                    st.success(f"**{tip}**")
+            else:
+                # في حال لم يجد جمل مفلترة، يعرض نصاً افتراضياً دقيقاً طبياً بناءً على المسبب
+                if "Streptococcus" in pathogen:
+                    st.warning("الجرعة القياسية: Amoxicillin (80–90 mg/kg per day in 2 divided doses)")
                 else:
-                    st.write(entry['Treatment Snippet'][:400] + "...")
-            except Exception as e:
-                st.error("خطأ في قراءة قاعدة البيانات. تأكد من وجود ملف الإكسل.")
+                    st.warning("الجرعة القياسية: Azithromycin (10 mg/kg on day 1, then 5 mg/kg for 4 days)")
+                    
+        except:
+            st.error("تأكد من وجود ملف pneumonia_reference.xlsx")
 
-st.markdown("---")
-st.caption("تنبيه: هذا التطبيق للاستخدام التعليمي والمساعدة التقنية فقط، القرار النهائي للطبيب المختص.")
+st.caption("ملاحظة: هذا النظام استرشادي فقط. القرار السريري النهائي للطبيب.")

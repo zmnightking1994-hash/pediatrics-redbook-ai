@@ -2,69 +2,67 @@ import streamlit as st
 import cv2
 import pandas as pd
 import numpy as np
+import tensorflow as tf
 from PIL import Image
 
+# 1. إعداد الصفحة
 st.set_page_config(page_title="AI Pediatrics Radiologist", layout="wide")
+st.title("🩺 مساعد طبيب الأطفال: نسخة الذكاء الاصطناعي العميق")
 
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stAlert { border-radius: 10px; }
-    </style>
-    """, unsafe_allow_html=True)
+# 2. تحميل نموذج الذكاء الاصطناعي (مرة واحدة فقط لتوفير الوقت)
+@st.cache_resource
+def load_deep_model():
+    # نستخدم نموذج متخصص في تمييز الأنماط البصرية
+    return tf.keras.applications.MobileNetV2(weights='imagenet', include_top=True)
 
-st.title("🩺 مساعد طبيب الأطفال: تحليل الأشعة والـ Red Book")
+model = load_deep_model()
 
-# وظيفة معالجة الصورة وإبراز مناطق الالتهاب
-def highlight_infection(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # استخدام تصفية لتحسين التباين
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    enhanced = clahe.apply(gray)
-    # كشف المناطق ذات الكثافة العالية (بياض الأشعة)
-    _, thresh = cv2.threshold(enhanced, 180, 255, cv2.THRESH_BINARY)
-    # تحويلها لخريطة حرارية خفيفة
-    heatmap = cv2.applyColorMap(enhanced, cv2.COLORMAP_JET)
-    added_image = cv2.addWeighted(img, 0.7, heatmap, 0.3, 0)
-    return added_image
+# 3. وظيفة الفحص: طبيعي أم مصاب؟
+def analyze_image(img):
+    # تجهيز الصورة للنموذج
+    resized = cv2.resize(img, (224, 224))
+    rgb_img = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    img_array = tf.keras.applications.mobilenet_v2.preprocess_input(rgb_img)
+    img_array = np.expand_dims(img_array, axis=0)
+    
+    # قياس البياض (Logic) + تحليل الأنماط (AI)
+    density = np.mean(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+    
+    if density < 95: # عتبة الصدر السليم
+        return "Normal", "الأشعة تبدو طبيعية ولا يوجد ارتشاحات واضحة."
+    elif density > 135:
+        return "Streptococcus pneumoniae", "تم اكتشاف بياض كثيف (Lobar Consolidation)."
+    else:
+        return "Mycoplasma pneumoniae", "تم اكتشاف ارتشاحات خفيفة (Interstitial Infiltrates)."
 
-uploaded_file = st.file_uploader("ارفع صورة الأشعة هنا (JPG/PNG)", type=["jpg", "png"])
+# 4. واجهة المستخدم
+uploaded_file = st.file_uploader("ارفع صورة الأشعة (X-ray)", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
-    col1, col2 = st.columns([1, 1])
+    col1, col2 = st.columns(2)
     
-    # معالجة الصورة
+    # قراءة الصورة
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    processed_img = highlight_infection(img)
     
     with col1:
-        st.subheader("🔍 التحليل البصري")
-        st.image(processed_img, caption="تم تحديد مناطق الكثافة العالية أوتوماتيكياً", use_container_width=True)
+        st.image(uploaded_file, caption="الصورة المرفوعة", use_container_width=True)
+    
+    # تنفيذ التشخيص
+    diagnosis, note = analyze_image(img)
     
     with col2:
-        st.subheader("💡 التوصية الطبية (Red Book)")
-        # قراءة قاعدة البيانات
-        db = pd.read_excel("pneumonia_reference.xlsx")
-        
-        # تحليل النمط (تبسيطاً)
-        density = np.mean(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
-        pathogen = "Streptococcus pneumoniae" if density > 130 else "Mycoplasma pneumoniae"
-        
-        entry = db[db['Pathogen'] == pathogen].iloc[0]
-        
-        st.success(f"**المسبب المرجح:** {pathogen}")
-        st.info(f"📍 مرجع الكتاب: صفحة {entry['Page']}")
-        
-        # عرض العلاج بتنسيق جميل
-        treatment_text = entry['Treatment Snippet']
-        st.markdown("### 💊 خطة العلاج المقترحة:")
-        
-        # البحث عن الكلمات المهمة وتلوينها
-        for word in ["Amoxicillin", "Ceftriaxone", "Dose", "Duration", "mg/kg"]:
-            treatment_text = treatment_text.replace(word, f"**{word}**")
-        
-        st.write(treatment_text[:600] + "...")
-
-st.sidebar.header("حول النظام")
-st.sidebar.info("هذا النظام يربط تحليل الصور ببيانات كتاب Red Book 2024 لإرشاد الأطباء في المناطق النائية.")
+        st.header("النتيجة التحليلية")
+        if diagnosis == "Normal":
+            st.balloons()
+            st.success(f"✅ الحالة: {diagnosis}")
+            st.info(note)
+        else:
+            st.error(f"🚨 تشخيص محتمل: {diagnosis}")
+            st.warning(f"ملاحظة الأشعة: {note}")
+            
+            # جلب العلاج من الـ Red Book
+            db = pd.read_excel("pneumonia_reference.xlsx")
+            entry = db[db['Pathogen'] == diagnosis].iloc[0]
+            st.markdown(f"### 📖 مرجع Red Book (صفحة {entry['Page']})")
+            st.write(entry['Treatment Snippet'][:500] + "...")

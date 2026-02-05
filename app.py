@@ -7,13 +7,13 @@ import os
 # 1. إعدادات الواجهة
 st.set_page_config(page_title="AI Pediatric Radiologist", layout="wide")
 
-# 2. تحميل الموديل بدون الطبقات التدريبية (لحل مشاكل التوافق)
+# 2. تحميل الموديل بدون قيود التوافق
 @st.cache_resource
 def load_ai_model():
     model_path = 'model.h5'
     if os.path.exists(model_path):
         try:
-            # استخدام compile=False ضروري جداً لتجاوز أخطاء الـ Kernels الأصلية
+            # استخدام compile=False ضروري جداً لتجاوز أخطاء الأبعاد الأصلية
             return tf.keras.models.load_model(model_path, compile=False)
         except Exception as e:
             return f"Error: {e}"
@@ -40,45 +40,37 @@ if uploaded_file:
     with col2:
         st.subheader("📋 نتيجة الفحص الذكي")
         if ai_brain is None:
-            st.error("ملف model.h5 غير موجود.")
+            st.error("ملف model.h5 غير موجود في المستودع.")
         elif isinstance(ai_brain, str):
             st.error(ai_brain)
         else:
             try:
-                # المقاس الذي يتوقعه الموديل
+                # المقاس الذي يطلبه الموديل
                 img_resized = cv2.resize(img, (150, 150)) / 255.0
                 
-                # --- الحل النهائي لمشكلة 5D vs 4D ---
-                # الموديل يطلب (None, None, 150, 150, 3)
-                # سنقوم بإنشاء مصفوفة خماسية الأبعاد يدوياً
-                # البعد الأول: Batch (1)
-                # البعد الثاني: Sequence/Depth (1)
-                img_5d = img_resized[np.newaxis, np.newaxis, :, :, :]
+                # --- الحل الجوهري: إعادة صياغة المصفوفة لـ 5 أبعاد ---
+                # الموديل يطلب: (Batch, Depth, Height, Width, Channels)
+                # سنحول المصفوفة من (150, 150, 3) إلى (1, 1, 150, 150, 3)
+                img_input = img_resized.reshape(1, 1, 150, 150, 3)
                 
                 # تنفيذ التوقع
-                prediction = ai_brain.predict(img_5d)
-                score = np.max(prediction) 
+                prediction = ai_brain.predict(img_input)
+                score = float(np.max(prediction)) 
                 
                 if score > 0.5:
-                    st.error(f"🚨 إيجابي: احتمالية التهاب رئوي {score*100:.1f}%")
+                    st.error(f"🚨 النتيجة: إيجابي (احتمالية التهاب رئوي {score*100:.1f}%)")
                     st.markdown("""
-                        <div style="background-color: #fff; padding: 10px; border-radius: 5px; border-right: 5px solid #e74c3c;">
+                        <div style="background-color: #ffffff; padding: 15px; border-radius: 10px; border-right: 5px solid #e74c3c; color: #2c3e50;">
                             <strong>💊 بروتوكول Red Book 2024:</strong><br>
-                            Amoxicillin (80–90 mg/kg/day) مقسمة على جرعتين.
+                            الخيار الأول: Amoxicillin (80–90 mg/kg/day).
                         </div>
                     """, unsafe_allow_html=True)
                 else:
-                    st.success(f"✅ سليم: الرئة طبيعية بنسبة {(1-score)*100:.1f}%")
+                    st.success(f"✅ النتيجة: سليمة (بنسبة تأكد {(1-score)*100:.1f}%)")
                     st.balloons()
             except Exception as e:
-                # محاولة أخيرة إذا كان الموديل يتوقع أبعاداً مختلفة قليلاً
-                st.warning("جاري محاولة ضبط الأبعاد تلقائياً...")
-                try:
-                    img_4d = img_resized[np.newaxis, :, :, :]
-                    score = ai_brain.predict(img_4d)[0][0]
-                    st.write(f"النتيجة: {score}")
-                except:
-                    st.error(f"❌ الموديل المرفوع لا يتوافق مع الصور الفردية. خطأ: {e}")
+                st.error(f"⚠️ تعذر التوافق مع أبعاد الموديل: {e}")
+                st.info("تأكد أن الموديل المرفوع يدعم مدخلات 150x150.")
 
 st.markdown("---")
-st.caption("أداة مساعدة تقنية للطبيب.")
+st.caption("أداة تقنية مساعدة للطبيب - النتيجة النهائية تخضع للتقييم السريري.")

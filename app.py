@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import tensorflow as tf
+import os
 
 # 1. إعداد الصفحة وتنسيق الواجهة الطبية
 st.set_page_config(page_title="AI Pediatric Radiologist", layout="wide")
@@ -24,15 +25,17 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 2. تحميل الموديل الذكي (model.h5)
+# 2. وظيفة تحميل الموديل الذكي
 @st.cache_resource
 def load_ai_model():
-    try:
-        # تأكد أن الملف مرفوع لـ GitHub باسم model.h5
-        model = tf.keras.models.load_model('model.h5')
-        return model
-    except Exception as e:
-        return None
+    model_path = 'model.h5'
+    if os.path.exists(model_path):
+        try:
+            model = tf.keras.models.load_model(model_path)
+            return model
+        except Exception as e:
+            return f"Error loading model: {e}"
+    return None
 
 ai_brain = load_ai_model()
 
@@ -51,7 +54,7 @@ RED_BOOK_GUIDELINES = {
     }
 }
 
-# 4. واجهة رفع الصور
+# 4. واجهة رفع الصور والمعالجة
 uploaded_file = st.file_uploader("ارفع صورة أشعة الصدر (X-ray)...", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
@@ -65,38 +68,40 @@ if uploaded_file:
         st.subheader("🔍 التحليل البصري")
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         heatmap = cv2.applyColorMap(cv2.equalizeHist(gray), cv2.COLORMAP_JET)
-        st.image(cv2.addWeighted(img, 0.6, heatmap, 0.4, 0), caption="تحديد مناطق الكثافة", use_container_width=True)
+        st.image(cv2.addWeighted(img, 0.6, heatmap, 0.4, 0), caption="تحديد مناطق الكثافة شعاعياً", use_container_width=True)
 
     with col2:
         st.subheader("📋 نتيجة الذكاء الاصطناعي")
         
         if ai_brain is None:
-            st.error("⚠️ لم يتم العثور على ملف model.h5 في المستودع.")
+            st.error("⚠️ لم يتم العثور على ملف model.h5 في المستودع. يرجى رفعه لـ GitHub بنفس الاسم.")
+        elif isinstance(ai_brain, str):
+            st.error(ai_brain)
         else:
-            # معالجة الصورة للموديل
+            # معالجة الصورة للموديل (نستخدم مقاس 150x150 وهو الشائع)
             img_resized = cv2.resize(img, (150, 150)) / 255.0
             img_input = np.expand_dims(img_resized, axis=0)
             
             prediction = ai_brain.predict(img_input)[0][0]
             
             if prediction > 0.5:
-                st.error(f"🚨 إيجابي: احتمالية التهاب رئوي {prediction*100:.1f}%")
+                st.error(f"🚨 إيجابي: احتمالية وجود التهاب رئوي {prediction*100:.1f}%")
                 
+                # عرض البروتوكول العلاجي
                 data = RED_BOOK_GUIDELINES["Streptococcus pneumoniae"]
                 st.markdown("### 💊 الخطة العلاجية الموصى بها:")
                 
-                # استخدام f-string مع التأكد من إغلاق القوس البرمجي
-                html_content = f"""
+                dosage_info = f"""
                 <div class="dosage-card"><strong>🦠 المسبب المرجح:</strong> Streptococcus pneumoniae</div>
-                <div class="dosage-card"><strong>📍 النمط:</strong> {data['pattern']}</div>
+                <div class="dosage-card"><strong>📍 النمط الشعاعي:</strong> {data['pattern']}</div>
                 <div class="dosage-card"><strong>💉 العلاج:</strong> {data['first_line']}</div>
-                <div class="dosage-card"><strong>⏱️ المدة:</strong> {data['duration']}</div>
+                <div class="dosage-card"><strong>⏱️ المدة المتوقعة:</strong> {data['duration']}</div>
                 <div class="dosage-card"><strong>📖 المرجع:</strong> Red Book 2024 (p. {data['page']})</div>
                 """
-                st.markdown(html_content, unsafe_allow_html=True)
+                st.markdown(dosage_info, unsafe_allow_html=True)
             else:
-                st.success(f"✅ سليم: الرئة طبيعية بنسبة {(1-prediction)*100:.1f}%")
+                st.success(f"✅ سليم: الرئة تظهر طبيعية بنسبة {(1-prediction)*100:.1f}%")
                 st.balloons()
 
 st.markdown("---")
-st.caption("تنبيه: هذا التطبيق أداة مساعدة للطبيب ولا يغني عن التقييم السريري.")
+st.caption("🩺 تنبيه طبي: هذا النظام أداة مساعدة تقنية للطبيب، والقرار النهائي يعتمد على التقييم السريري.")

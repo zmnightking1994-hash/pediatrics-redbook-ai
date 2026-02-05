@@ -4,16 +4,16 @@ import numpy as np
 import tensorflow as tf
 import os
 
-# 1. إعدادات الواجهة
-st.set_page_config(page_title="AI Pediatric Radiologist", layout="wide")
+# 1. إعدادات الصفحة
+st.set_page_config(page_title="Pediatric AI Expert", layout="wide")
 
-# 2. تحميل الموديل بحذر
+# 2. تحميل الموديل مع تجاهل إعدادات التدريب الأصلية لتجنب التعارض
 @st.cache_resource
 def load_ai_model():
     model_path = 'model.h5'
     if os.path.exists(model_path):
         try:
-            # استخدام compile=False لتجنب مشاكل الإصدارات
+            # استخدام compile=False ضروري جداً هنا لحل مشاكل التوافق
             return tf.keras.models.load_model(model_path, compile=False)
         except Exception as e:
             return f"Error: {e}"
@@ -21,10 +21,9 @@ def load_ai_model():
 
 ai_brain = load_ai_model()
 
-st.title("🩺 مساعد طبيب الأطفال الذكي")
-st.markdown("---")
+st.title("🩺 مساعد طبيب الأطفال: Red Book + AI")
 
-# 3. رفع الصورة والمعالجة
+# 3. واجهة رفع الملفات
 uploaded_file = st.file_uploader("ارفع صورة الأشعة (X-ray)...", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
@@ -41,37 +40,40 @@ if uploaded_file:
     with col2:
         st.subheader("📋 نتيجة الفحص الذكي")
         if ai_brain is None:
-            st.error("ملف model.h5 غير موجود.")
+            st.error("ملف model.h5 غير موجود في GitHub.")
         elif isinstance(ai_brain, str):
             st.error(ai_brain)
         else:
             try:
-                # تغيير الحجم للمقاس المطلوب 150x150
+                # تحضير الصورة بالمقاس الذي يطلبه الموديل (150x150)
                 img_resized = cv2.resize(img, (150, 150)) / 255.0
                 
-                # --- الحل السحري لمشكلة الـ Kernel Shape ---
-                # الموديل يتوقع (Batch, Time, Height, Width, Channels)
-                # سنضيف بُعدين إضافيين للصورة لتصبح 5D
-                img_input = np.expand_dims(img_resized, axis=0) # تصبح (1, 150, 150, 3)
-                img_input = np.expand_dims(img_input, axis=0) # تصبح (1, 1, 150, 150, 3) وهو المطلوب!
-
+                # --- التعديل الجوهري لحل خطأ Kernel Shape ---
+                # الموديل يتوقع 5 أبعاد: (Batch, Frames, Height, Width, Channels)
+                # سنضيف بُعدين إضافيين للصورة:
+                img_input = np.expand_dims(img_resized, axis=0) # البعد الرابع (Batch)
+                img_input = np.expand_dims(img_input, axis=0) # البعد الخامس (Frames/Time)
+                
+                # الآن أصبح شكل المدخلات (1, 1, 150, 150, 3) وهذا سيحل الخطأ
                 prediction = ai_brain.predict(img_input)
-                score = np.max(prediction) # استخراج أعلى قيمة ثقة
+                score = np.max(prediction) 
                 
                 if score > 0.5:
-                    st.error(f"🚨 نتيجة إيجابية: احتمالية التهاب رئوي {score*100:.1f}%")
+                    st.error(f"🚨 إيجابي: احتمالية التهاب رئوي {score*100:.1f}%")
                     st.markdown("""
-                        <div style="background-color: #fff; padding: 15px; border-radius: 10px; border-right: 5px solid #27ae60;">
-                            <strong>💊 بروتوكول Red Book 2024:</strong><br>
-                            Amoxicillin (80–90 mg/kg/day) - مرتين يومياً لمدة 5-7 أيام.
+                        <div style="background-color: #f8d7da; padding: 15px; border-radius: 10px; border: 1px solid #f5c6cb;">
+                            <strong>💉 بروتوكول Red Book 2024:</strong><br>
+                            Amoxicillin (80–90 mg/kg/day) مقسمة على جرعتين.<br>
+                            المرجع: صفحة 646.
                         </div>
                     """, unsafe_allow_html=True)
                 else:
-                    st.success(f"✅ نتيجة سليمة: الرئة طبيعية بنسبة {(1-score)*100:.1f}%")
+                    st.success(f"✅ سليم: الرئة تظهر طبيعية بنسبة {(1-score)*100:.1f}%")
                     st.balloons()
+                    
             except Exception as e:
-                st.error(f"⚠️ خطأ في توافق الموديل: {e}")
-                st.info("نصيحة: الموديل المرفوع قد يكون مصمماً لبيانات معقدة جداً.")
+                st.error(f"❌ خطأ فني: {e}")
+                st.info("هذا الموديل يتطلب معالجة خاصة للأبعاد.")
 
 st.markdown("---")
-st.caption("أداة مساعدة للطبيب - تعتمد النتيجة النهائية على التقييم السريري.")
+st.caption("أداة مساعدة تقنية للطبيب - النتيجة النهائية تخضع للتقييم السريري.")

@@ -7,13 +7,13 @@ import os
 # 1. إعدادات الواجهة
 st.set_page_config(page_title="AI Pediatric Radiologist", layout="wide")
 
-# 2. تحميل الموديل بدون قيود التوافق
+# 2. تحميل الموديل
 @st.cache_resource
 def load_ai_model():
     model_path = 'model.h5'
     if os.path.exists(model_path):
         try:
-            # استخدام compile=False ضروري جداً لتجاوز أخطاء الأبعاد الأصلية
+            # التحميل بدون compile يحل مشاكل التوافق في الأجهزة المختلفة
             return tf.keras.models.load_model(model_path, compile=False)
         except Exception as e:
             return f"Error: {e}"
@@ -22,12 +22,15 @@ def load_ai_model():
 ai_brain = load_ai_model()
 
 st.title("🩺 مساعد طبيب الأطفال الذكي")
-st.markdown("---")
+st.write("تحليل أشعة الصدر بناءً على بروتوكول Red Book 2024")
 
+# 3. رفع الصورة
 uploaded_file = st.file_uploader("ارفع صورة الأشعة (X-ray)...", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
     col1, col2 = st.columns([1, 1.2])
+    
+    # تحويل الملف المرفوع لصفوفة
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
 
@@ -40,37 +43,36 @@ if uploaded_file:
     with col2:
         st.subheader("📋 نتيجة الفحص الذكي")
         if ai_brain is None:
-            st.error("ملف model.h5 غير موجود في المستودع.")
+            st.error("ملف model.h5 غير موجود في GitHub.")
         elif isinstance(ai_brain, str):
             st.error(ai_brain)
         else:
             try:
-                # المقاس الذي يطلبه الموديل
+                # المقاس الذي أكده الخطأ البرمجي (150x150)
                 img_resized = cv2.resize(img, (150, 150)) / 255.0
                 
-                # --- الحل الجوهري: إعادة صياغة المصفوفة لـ 5 أبعاد ---
-                # الموديل يطلب: (Batch, Depth, Height, Width, Channels)
-                # سنحول المصفوفة من (150, 150, 3) إلى (1, 1, 150, 150, 3)
-                img_input = img_resized.reshape(1, 1, 150, 150, 3)
-                
-                # تنفيذ التوقع
+                # --- التعديل الجوهري: إضافة بُعد واحد فقط (Batch) ---
+                # الصورة ستصبح أبعادها (1, 150, 150, 3) وهذا يطابق طول النواة (Kernel Length)
+                img_input = np.expand_dims(img_resized, axis=0) 
+
                 prediction = ai_brain.predict(img_input)
                 score = float(np.max(prediction)) 
                 
                 if score > 0.5:
-                    st.error(f"🚨 النتيجة: إيجابي (احتمالية التهاب رئوي {score*100:.1f}%)")
+                    st.error(f"🚨 إيجابي: احتمالية التهاب رئوي {score*100:.1f}%")
                     st.markdown("""
                         <div style="background-color: #ffffff; padding: 15px; border-radius: 10px; border-right: 5px solid #e74c3c; color: #2c3e50;">
-                            <strong>💊 بروتوكول Red Book 2024:</strong><br>
-                            الخيار الأول: Amoxicillin (80–90 mg/kg/day).
+                            <strong>💊 خطة العلاج المعتمدة (Red Book):</strong><br>
+                            - <b>المضاد:</b> Amoxicillin (80–90 mg/kg/day).<br>
+                            - <b>المدة:</b> 5-7 أيام للحالات غير المختلطة.
                         </div>
                     """, unsafe_allow_html=True)
                 else:
-                    st.success(f"✅ النتيجة: سليمة (بنسبة تأكد {(1-score)*100:.1f}%)")
+                    st.success(f"✅ سليم: الرئة طبيعية بنسبة {(1-score)*100:.1f}%")
                     st.balloons()
             except Exception as e:
-                st.error(f"⚠️ تعذر التوافق مع أبعاد الموديل: {e}")
-                st.info("تأكد أن الموديل المرفوع يدعم مدخلات 150x150.")
+                st.error(f"⚠️ فشل التحليل: {e}")
+                st.info("حاول رفع صورة بجودة أوضح.")
 
 st.markdown("---")
-st.caption("أداة تقنية مساعدة للطبيب - النتيجة النهائية تخضع للتقييم السريري.")
+st.caption("أداة مساعدة تقنية للطبيب - القرار النهائي يعتمد على الفحص السريري.")
